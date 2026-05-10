@@ -65,7 +65,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
           destinationPortRange: '80'
-          description: 'HTTP — required for Caddy Let''s Encrypt ACME challenge'
+          description: 'HTTP — required for Caddy Let\'s Encrypt ACME challenge'
         }
       }
       {
@@ -163,8 +163,8 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     storageProfile: {
       imageReference: {
         publisher: 'Canonical'
-        offer: '0001-com-ubuntu-server-noble'  // Ubuntu 24.04 LTS
-        sku: '24_04-lts-gen2'
+        offer: '0001-com-ubuntu-server-jammy'  // Ubuntu 22.04 LTS (supported until Apr 2027)
+        sku: '22_04-lts-gen2'
         version: 'latest'
       }
       osDisk: {
