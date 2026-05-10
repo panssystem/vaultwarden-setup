@@ -1,0 +1,27 @@
+# Caddy reverse proxy for Vaultwarden
+# DOMAIN env var controls the hostname Caddy serves.
+# - Local:      DOMAIN=localhost   → self-signed cert trusted by Caddy's local CA
+# - Production: DOMAIN=vault.example.com → automatic Let's Encrypt cert
+
+{$DOMAIN:localhost} {
+    # Proxy all traffic to Vaultwarden
+    reverse_proxy vaultwarden:80 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "no-referrer"
+    }
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}

@@ -1,0 +1,57 @@
+services:
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Internal websocket notifications
+      WEBSOCKET_ENABLED: "true"
+      SHOW_PASSWORD_HINTS: "false"
+    volumes:
+      - vw-data:/data
+    networks:
+      - vw-internal
+    # Not exposed directly — Caddy handles all public traffic
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  caddy:
+    image: caddy:alpine
+    container_name: vaultwarden-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data        # persists certs across restarts
+      - caddy-config:/config
+    environment:
+      # Caddy reads DOMAIN from the same env file via the Caddyfile {$DOMAIN} placeholder
+      DOMAIN: ${DOMAIN:-localhost}
+    networks:
+      - vw-internal
+    depends_on:
+      vaultwarden:
+        condition: service_healthy
+
+volumes:
+  vw-data:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+
+networks:
+  vw-internal:
+    driver: bridge
