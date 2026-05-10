@@ -2,9 +2,28 @@
 # DOMAIN env var controls the hostname Caddy serves.
 # - Local:      DOMAIN=localhost   → self-signed cert trusted by Caddy's local CA
 # - Production: DOMAIN=vault.example.com → automatic Let's Encrypt cert
+#
+# ADMIN_ALLOWED_IP env var restricts /admin to a specific IP (e.g. your home IP).
+# Defaults to 127.0.0.1 (localhost only) if not set — effectively blocks remote access.
+# Set to your public IP in .env: ADMIN_ALLOWED_IP=1.2.3.4
 
 {$DOMAIN:localhost} {
-    # Proxy all traffic to Vaultwarden
+
+    # ── /admin — restricted to ADMIN_ALLOWED_IP ──────────────────────────────
+    @admin path /admin*
+    handle @admin {
+        @allowed_admin remote_ip {$ADMIN_ALLOWED_IP:127.0.0.1}
+        handle @allowed_admin {
+            reverse_proxy vaultwarden:80 {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+            }
+        }
+        respond 403
+    }
+
+    # ── All other traffic ─────────────────────────────────────────────────────
     reverse_proxy vaultwarden:80 {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}

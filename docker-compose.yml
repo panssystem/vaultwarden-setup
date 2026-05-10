@@ -87,7 +87,7 @@ services:
   # the cloudflare action (see fail2ban/README.md).
   # ─────────────────────────────────────────────
   fail2ban:
-    profiles: ["tunnel"]
+    profiles: ["tunnel", "caddy"]
     image: lscr.io/linuxserver/fail2ban:latest
     container_name: vaultwarden-fail2ban
     restart: unless-stopped
