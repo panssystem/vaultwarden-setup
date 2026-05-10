@@ -72,20 +72,32 @@ TIMESTAMP=$(date +%F-%H%M)
 ARCHIVE="${BACKUP_DIR}/vw-data-${TIMESTAMP}.tar.gz"
 mkdir -p "$BACKUP_DIR"
 
-# Flush SQLite WAL so the main db file is self-contained before we snapshot it.
-# The vaultwarden image has no sqlite3 CLI, so we use a throwaway alpine container.
-# The WAL and SHM files are included in the tar anyway, so recovery works either
-# way — this is just a belt-and-suspenders cleanliness step.
-docker run --rm \
-  -v vaultwarden-setup_vw-data:/data \
-  alpine sh -c 'apk add -q --no-cache sqlite && sqlite3 /data/db.sqlite3 "PRAGMA wal_checkpoint(TRUNCATE);"' \
-  2>/dev/null || true
-
-# Create local archive from the live volume (read-only mount)
+# Step 1 — VACUUM INTO: compacts the database and writes a clean, WAL-free snapshot.
+# Safe on a live database — SQLite takes an internal consistent read; vaultwarden
+# keeps running normally. The vaultwarden image has no sqlite3 CLI, so we use a
+# throwaway alpine container. Output goes directly to the backup dir.
 docker run --rm \
   -v vaultwarden-setup_vw-data:/data:ro \
   -v "${BACKUP_DIR}:/backup" \
-  alpine tar czf "/backup/vw-data-${TIMESTAMP}.tar.gz" /data
+  alpine sh -c "apk add -q --no-cache sqlite && sqlite3 /data/db.sqlite3 \"VACUUM INTO '/backup/db.sqlite3';\""
+
+# Step 2 — tar: archive the vacuumed db (from backup dir) + everything else in the
+# volume. We skip the live db files (replaced by the vacuum copy), the WAL/SHM
+# (consolidated by VACUUM INTO), and icon_cache (large, auto-regenerated on start).
+docker run --rm \
+  -v vaultwarden-setup_vw-data:/data:ro \
+  -v "${BACKUP_DIR}:/backup" \
+  alpine tar czf "/backup/vw-data-${TIMESTAMP}.tar.gz" \
+    -C /backup db.sqlite3 \
+    -C /data \
+    --exclude="./db.sqlite3" \
+    --exclude="./db.sqlite3-wal" \
+    --exclude="./db.sqlite3-shm" \
+    --exclude="./icon_cache" \
+    .
+
+# Remove the standalone vacuum copy — it's now inside the archive
+rm -f "${BACKUP_DIR}/db.sqlite3"
 
 echo "Local backup: ${ARCHIVE} ($(du -sh "$ARCHIVE" | cut -f1))"
 
