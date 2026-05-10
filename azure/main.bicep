@@ -197,9 +197,54 @@ resource autoShutdown 'Microsoft.DevTestLab/schedules@2018-09-15' = {
   }
 }
 
+// ── Backup Storage ────────────────────────────────────────────────────────────
+// Standard_LRS (locally redundant) — 3 copies within one datacenter, ~$0.02/GB/mo.
+// The name must be globally unique, 3–24 chars, lowercase alphanumeric only.
+// uniqueString() is a deterministic hash of the resource group ID — different
+// for every deployment but stable across re-deployments of the same RG.
+
+var storageAccountName = take('${toLower(replace(namePrefix, '-', ''))}${uniqueString(resourceGroup().id)}', 24)
+
+resource backupStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    accessTier: 'Cool'               // written once, rarely read — saves ~40%
+    allowBlobPublicAccess: false
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+  }
+}
+
+resource backupBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: backupStorage
+  name: 'default'
+}
+
+resource backupContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: backupBlobService
+  name: 'vw-backups'
+  properties: { publicAccess: 'None' }
+}
+
+// Grant the VM's managed identity write access — no credentials needed on the VM
+var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+resource backupRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(backupStorage.id, vm.id, storageBlobDataContributorRoleId)
+  scope: backupStorage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+    principalId: vm.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // ── Outputs ───────────────────────────────────────────────────────────────────
 
 output vmPublicIP string = publicIp.properties.ipAddress
 output sshCommand string = 'ssh ${adminUsername}@${publicIp.properties.ipAddress}'
 output vmPrincipalId string = vm.identity.principalId
 output vmName string = vm.name
+output backupStorageAccount string = storageAccountName

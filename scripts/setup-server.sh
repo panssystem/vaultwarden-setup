@@ -62,25 +62,66 @@ mkdir -p /opt/backups
 cat > /opt/vaultwarden-backup.sh << 'BACKUP_SCRIPT'
 #!/usr/bin/env bash
 # Daily backup of vaultwarden data volume.
-# Keeps 30 days of archives in /opt/backups.
+# - Creates a local tar.gz in /opt/backups (keeps 30 days)
+# - Uploads to Azure Blob Storage using the VM's managed identity (no credentials needed)
+# Storage account name is read from /etc/vaultwarden-backup.conf (written by deploy.sh)
 set -euo pipefail
+
 BACKUP_DIR=/opt/backups
+TIMESTAMP=$(date +%F-%H%M)
+ARCHIVE="${BACKUP_DIR}/vw-data-${TIMESTAMP}.tar.gz"
 mkdir -p "$BACKUP_DIR"
 
-# Dump the live SQLite DB via vaultwarden's built-in backup API (safe mid-run)
-# Fall back to a plain tar if the container isn't running
-if docker inspect vaultwarden &>/dev/null; then
-  docker exec vaultwarden sqlite3 /data/db.sqlite3 ".backup '/data/db.sqlite3.bak'"
+# Flush SQLite WAL to ensure a clean snapshot
+if docker inspect vaultwarden &>/dev/null 2>&1; then
+  docker exec vaultwarden sqlite3 /data/db.sqlite3 "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
 fi
 
+# Create local archive from the live volume (read-only mount)
 docker run --rm \
   -v vaultwarden-setup_vw-data:/data:ro \
-  -v "$BACKUP_DIR":/backup \
-  alpine tar czf "/backup/vw-data-$(date +%F-%H%M).tar.gz" /data
+  -v "${BACKUP_DIR}:/backup" \
+  alpine tar czf "/backup/vw-data-${TIMESTAMP}.tar.gz" /data
 
-# Prune archives older than 30 days
+echo "Local backup: ${ARCHIVE} ($(du -sh "$ARCHIVE" | cut -f1))"
+
+# Prune local archives older than 30 days
 find "$BACKUP_DIR" -name "vw-data-*.tar.gz" -mtime +30 -delete
-echo "Backup complete: /backup/vw-data-$(date +%F-%H%M).tar.gz"
+
+# ── Upload to Azure Blob Storage ──────────────────────────────────────────────
+# Reads storage account name from config written by deploy.sh.
+# Uses the VM's managed identity via IMDS — no credentials stored anywhere.
+CONF=/etc/vaultwarden-backup.conf
+if [[ ! -f "$CONF" ]]; then
+  echo "WARN: $CONF not found — skipping Azure upload. Run deploy.sh to configure."
+  exit 0
+fi
+# shellcheck source=/dev/null
+source "$CONF"
+
+if [[ -z "${BACKUP_STORAGE_ACCOUNT:-}" ]]; then
+  echo "WARN: BACKUP_STORAGE_ACCOUNT not set in $CONF — skipping Azure upload."
+  exit 0
+fi
+
+# Get a short-lived bearer token from the Azure Instance Metadata Service
+TOKEN=$(curl -sf \
+  -H "Metadata: true" \
+  "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fstorage.azure.com%2F" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+BLOB_NAME="vw-data-${TIMESTAMP}.tar.gz"
+UPLOAD_URL="https://${BACKUP_STORAGE_ACCOUNT}.blob.core.windows.net/vw-backups/${BLOB_NAME}"
+
+curl -sf -X PUT \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "x-ms-version: 2020-04-08" \
+  -H "x-ms-blob-type: BlockBlob" \
+  -H "Content-Type: application/gzip" \
+  --data-binary @"${ARCHIVE}" \
+  "${UPLOAD_URL}"
+
+echo "Uploaded to Azure: ${UPLOAD_URL}"
 BACKUP_SCRIPT
 
 chmod +x /opt/vaultwarden-backup.sh

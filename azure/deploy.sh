@@ -77,6 +77,22 @@ DEPLOY_OUTPUT=$(az deployment group create \
 VM_IP=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['properties']['outputs']['vmPublicIP']['value'])" 2>/dev/null || echo "unknown")
 VM_NAME=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['properties']['outputs']['vmName']['value'])" 2>/dev/null || echo "vaultwarden-vm")
 PRINCIPAL_ID=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['properties']['outputs']['vmPrincipalId']['value'])" 2>/dev/null || echo "")
+STORAGE_ACCOUNT=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['properties']['outputs']['backupStorageAccount']['value'])" 2>/dev/null || echo "")
+
+# ── Write backup config to the VM ─────────────────────────────────────────────
+# Cloud-init may still be running — run-command executes independently and the
+# backup script reads this file at runtime, so ordering doesn't matter.
+
+if [[ -n "$STORAGE_ACCOUNT" && -n "$VM_NAME" ]]; then
+  echo "Writing backup storage config to VM..."
+  az vm run-command invoke \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$VM_NAME" \
+    --command-id RunShellScript \
+    --scripts "echo 'BACKUP_STORAGE_ACCOUNT=${STORAGE_ACCOUNT}' > /etc/vaultwarden-backup.conf && chmod 600 /etc/vaultwarden-backup.conf" \
+    --output none
+  echo "Backup config written: storage account = $STORAGE_ACCOUNT"
+fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +103,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  VM public IP :  $VM_IP"
 echo "  SSH command  :  ssh -i $SSH_KEY_PATH azureuser@$VM_IP"
 echo "  VM identity  :  $PRINCIPAL_ID"
+echo "  Backup store :  $STORAGE_ACCOUNT (container: vw-backups)"
 echo ""
 echo "  Cloud-init is running in the background on the VM."
 echo "  Wait ~2 minutes, then SSH in and check progress:"
@@ -106,5 +123,6 @@ RESOURCE_GROUP=$RESOURCE_GROUP
 SSH_KEY=$SSH_KEY_PATH
 SSH_COMMAND=ssh -i $SSH_KEY_PATH azureuser@$VM_IP
 PRINCIPAL_ID=$PRINCIPAL_ID
+BACKUP_STORAGE_ACCOUNT=$STORAGE_ACCOUNT
 EOF
 echo "  Connection info saved to .azure-vm-info"
