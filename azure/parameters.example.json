@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": {
+      "value": "vaultwarden"
+    },
+    "adminUsername": {
+      "value": "azureuser"
+    },
+    "sshPublicKey": {
+      "value": "ssh-rsa AAAA... your-public-key-here"
+    },
+    "vmSize": {
+      "value": "Standard_B2s"
+    },
+    "osDiskSizeGB": {
+      "value": 30
+    },
+    "allowSshFromIP": {
+      "value": "YOUR.PUBLIC.IP.ADDRESS"
+    }
+  }
+}
