@@ -37,7 +37,7 @@ dpkg-reconfigure -f noninteractive unattended-upgrades
 
 echo "==> [5/6] Cloning vaultwarden-setup repo..."
 REPO_DIR="/opt/vaultwarden-setup"
-git clone https://github.com/YOUR_GITHUB_USERNAME/vaultwarden-setup.git "$REPO_DIR" || {
+git clone https://github.com/panssystem/vaultwarden-setup.git "$REPO_DIR" || {
   # If repo isn't public yet, create the directory and rsync files manually
   mkdir -p "$REPO_DIR"
   echo "NOTE: Repo not cloned — copy files manually or push to GitHub and re-run."
