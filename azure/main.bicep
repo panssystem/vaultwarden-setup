@@ -1,5 +1,5 @@
 // Azure infrastructure for Vaultwarden
-// Deploys: VNet, NSG, public IP, NIC, B1ms VM with managed identity
+// Deploys: VNet, NSG, public IP, NIC, B1ms VM (Ubuntu 24.04 LTS) with managed identity
 // Caddy handles TLS — ports 80 (ACME challenge) and 443 (HTTPS) are open.
 
 targetScope = 'resourceGroup'
@@ -163,8 +163,8 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     storageProfile: {
       imageReference: {
         publisher: 'Canonical'
-        offer: '0001-com-ubuntu-server-jammy'  // Ubuntu 22.04 LTS (supported until Apr 2027)
-        sku: '22_04-lts-gen2'
+        offer: 'ubuntu-24_04-lts'              // Ubuntu 24.04 LTS (supported until Apr 2029)
+        sku: 'server'
         version: 'latest'
       }
       osDisk: {
