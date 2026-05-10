@@ -1,0 +1,36 @@
+# Requires nginx-ingress-controller and cert-manager installed in the cluster.
+# Install cert-manager: https://cert-manager.io/docs/installation/
+# Install nginx ingress: https://kubernetes.github.io/ingress-nginx/deploy/
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"       # allow large attachment uploads
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "90"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "90"
+    # WebSocket support for real-time notifications
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+    # Auto-issue cert via cert-manager
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - vault.example.com      # Change to your domain
+      secretName: vaultwarden-tls
+  rules:
+    - host: vault.example.com    # Change to your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vaultwarden
+                port:
+                  name: http

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vaultwarden-config
+  namespace: vaultwarden
+data:
+  DOMAIN: "https://vault.example.com"        # Change to your domain
+  SIGNUPS_ALLOWED: "true"                    # Disable after account creation
+  SHOW_PASSWORD_HINTS: "false"
+  WEBSOCKET_ENABLED: "true"
+  LOG_LEVEL: "info"
+  # SMTP_HOST: "smtp.example.com"
+  # SMTP_FROM: "vaultwarden@example.com"
+  # SMTP_PORT: "587"
+  # SMTP_SECURITY: "starttls"
