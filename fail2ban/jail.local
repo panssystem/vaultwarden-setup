@@ -1,0 +1,39 @@
+# Fail2Ban jail configuration for Vaultwarden
+# Mounted read-only into the fail2ban container at /config/fail2ban/
+
+[DEFAULT]
+# Ban for 1 hour on first offence
+bantime  = 3600
+# 5 failures within 10 minutes triggers a ban
+findtime = 600
+maxretry = 5
+# Use iptables to ban (works for direct-access scenarios)
+# For Cloudflare Tunnel, see fail2ban/README.md for CF API action setup
+banaction = iptables-allports
+
+[vaultwarden]
+enabled  = true
+port     = 80,443
+filter   = vaultwarden
+logpath  = /vaultwarden-data/vaultwarden.log
+maxretry = 5
+bantime  = 3600
+findtime = 600
+
+[vaultwarden-admin]
+enabled  = true
+port     = 80,443
+filter   = vaultwarden
+logpath  = /vaultwarden-data/vaultwarden.log
+# Stricter limits for admin panel — ban on first 3 failures for 24 hours
+maxretry = 3
+bantime  = 86400
+findtime = 600
+
+[sshd]
+enabled  = true
+port     = ssh
+filter   = sshd
+logpath  = /var/log/auth.log
+maxretry = 5
+bantime  = 3600
