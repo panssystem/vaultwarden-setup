@@ -19,7 +19,7 @@ All traffic flows: **Browser → Cloudflare Edge → encrypted tunnel → your V
 3. Cloudflare will scan your existing DNS records
 4. Copy the two **Cloudflare nameservers** shown (e.g. `ada.ns.cloudflare.com`)
 5. Log in to your domain registrar and replace the nameservers with Cloudflare's
-6. Wait for propagation (~10–30 minutes — check with `nslookup -type=NS yourdomain.com`)
+6. Wait for propagation (~10–30 minutes — check with `nslookup -type=NS kaosklan.net`)
 
 ---
 
@@ -54,11 +54,11 @@ On the **Public Hostnames** tab:
 | Field | Value |
 |---|---|
 | Subdomain | `vault` (or whatever you prefer) |
-| Domain | your domain (e.g. `example.com`) |
+| Domain | `kaosklan.net` |
 | Type | `HTTP` |
 | URL | `vaultwarden:80` |
 
-This routes `https://vault.example.com` → through the tunnel → to the Vaultwarden container on port 80.
+This routes `https://vault.kaosklan.net` → through the tunnel → to the Vaultwarden container on port 80.
 
 Click **Save tunnel**.
 
@@ -69,7 +69,7 @@ Click **Save tunnel**.
 On your Azure VM, edit `/opt/vaultwarden-setup/.env`:
 
 ```bash
-DOMAIN=https://vault.yourdomain.com
+DOMAIN=https://vault.kaosklan.net
 CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiMTIz...   # paste your token here
 IP_HEADER=CF-Connecting-IP
 SIGNUPS_ALLOWED=true                        # set false after account creation
@@ -95,7 +95,7 @@ You should see three containers running:
 
 ## Step 7 — Verify
 
-1. Open `https://vault.yourdomain.com` in your browser
+1. Open `https://vault.kaosklan.net` in your browser
 2. You should see the Vaultwarden login page with a valid HTTPS certificate
 3. Check the Cloudflare tunnel status: **Zero Trust → Networks → Tunnels** — it should show **Healthy**
 

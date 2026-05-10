@@ -21,10 +21,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - vault.example.com      # Change to your domain
+        - vault.kaosklan.net      # Change to your domain
       secretName: vaultwarden-tls
   rules:
-    - host: vault.example.com    # Change to your domain
+    - host: vault.kaosklan.net    # Change to your domain
       http:
         paths:
           - path: /

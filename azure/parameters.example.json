@@ -12,7 +12,7 @@
       "value": "ssh-rsa AAAA... your-public-key-here"
     },
     "vmSize": {
-      "value": "Standard_B2s"
+      "value": "Standard_B1ms"
     },
     "osDiskSizeGB": {
       "value": 30

@@ -1,5 +1,5 @@
 // Azure infrastructure for Vaultwarden
-// Deploys: VNet, NSG, public IP (SSH only), NIC, B2s VM with managed identity
+// Deploys: VNet, NSG, public IP (SSH only), NIC, B1ms VM with managed identity
 // Cloudflare Tunnel means NO inbound 80/443 needed — NSG only allows SSH.
 
 targetScope = 'resourceGroup'
@@ -16,9 +16,9 @@ param adminUsername string = 'azureuser'
 @description('SSH public key for VM access (contents of ~/.ssh/id_rsa.pub or similar)')
 param sshPublicKey string
 
-@description('VM size — B2s (2 vCPU, 4 GB) handles up to ~10 users comfortably')
-@allowed(['Standard_B1s', 'Standard_B2s', 'Standard_B2ms'])
-param vmSize string = 'Standard_B2s'
+@description('VM size. B1ms (1 vCPU, 2 GB) is the sweet spot for 1–5 users (~$14/mo). B1s (1 GB, ~$8/mo) works but is tighter.')
+@allowed(['Standard_B1s', 'Standard_B1ms', 'Standard_B2s', 'Standard_B2ms'])
+param vmSize string = 'Standard_B1ms'
 
 @description('OS disk size in GB')
 param osDiskSizeGB int = 30
