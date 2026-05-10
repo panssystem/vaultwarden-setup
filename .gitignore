@@ -13,6 +13,10 @@ caddy-config/
 # Docker override files
 docker-compose.override.yml
 
+# Azure deployment info (contains IP and key paths)
+.azure-vm-info
+azure/parameters.json
+
 # Kubernetes secrets
 k8s/secrets.yaml
 k8s/secret-*.yaml

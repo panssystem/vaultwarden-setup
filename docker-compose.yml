@@ -1,4 +1,8 @@
 services:
+
+  # ─────────────────────────────────────────────
+  # Vaultwarden — runs in both local and prod
+  # ─────────────────────────────────────────────
   vaultwarden:
     image: vaultwarden/server:latest
     container_name: vaultwarden
@@ -6,44 +10,98 @@ services:
     env_file:
       - .env
     environment:
-      # Internal websocket notifications
       WEBSOCKET_ENABLED: "true"
       SHOW_PASSWORD_HINTS: "false"
+      # Write logs to a file so fail2ban can read them
+      LOG_FILE: /data/vaultwarden.log
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - vw-data:/data
     networks:
       - vw-internal
-    # Not exposed directly — Caddy handles all public traffic
     expose:
       - "80"
     healthcheck:
-      # vaultwarden/server is Debian-slim based — use wget, not curl
+      # vaultwarden/server is Debian-slim — use wget, not curl
       test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:80/alive"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
 
+  # ─────────────────────────────────────────────
+  # LOCAL profile — Caddy provides HTTPS via
+  # self-signed cert (localhost) or Let's Encrypt
+  # Usage: docker compose --profile local up -d
+  # ─────────────────────────────────────────────
   caddy:
+    profiles: ["local"]
     image: caddy:alpine
     container_name: vaultwarden-caddy
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp"   # HTTP/3
+      - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data        # persists certs across restarts
+      - caddy-data:/data
       - caddy-config:/config
     environment:
-      # Caddy reads DOMAIN from the same env file via the Caddyfile {$DOMAIN} placeholder
       DOMAIN: ${DOMAIN:-localhost}
     networks:
       - vw-internal
     depends_on:
       vaultwarden:
         condition: service_started
+
+  # ─────────────────────────────────────────────
+  # PROD profile — Cloudflare Tunnel
+  # No inbound ports needed on the host at all.
+  # Tunnel routes traffic to vaultwarden:80
+  # internally on the vw-internal network.
+  # Usage: docker compose --profile prod up -d
+  # ─────────────────────────────────────────────
+  cloudflared:
+    profiles: ["prod"]
+    image: cloudflare/cloudflared:latest
+    container_name: vaultwarden-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - vw-internal
+    depends_on:
+      vaultwarden:
+        condition: service_started
+
+  # ─────────────────────────────────────────────
+  # PROD profile — Fail2Ban
+  # Reads Vaultwarden log file and bans IPs that
+  # repeatedly fail authentication.
+  # Note: with Cloudflare Tunnel, bans apply at
+  # the OS iptables level (blocks non-CF traffic).
+  # For CF-level banning add a CF API token and
+  # the cloudflare action (see fail2ban/README.md).
+  # ─────────────────────────────────────────────
+  fail2ban:
+    profiles: ["prod"]
+    image: lscr.io/linuxserver/fail2ban:latest
+    container_name: vaultwarden-fail2ban
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: host        # must use host network to apply iptables rules
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./fail2ban:/config/fail2ban:ro         # jail + filter configs
+      - vw-data:/vaultwarden-data:ro           # read vaultwarden.log
+      - /var/log:/var/log:ro                   # OS logs (for sshd jail)
 
 volumes:
   vw-data:
