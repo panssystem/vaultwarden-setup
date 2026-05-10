@@ -1,6 +1,6 @@
 // Azure infrastructure for Vaultwarden
-// Deploys: VNet, NSG, public IP (SSH only), NIC, B1ms VM with managed identity
-// Cloudflare Tunnel means NO inbound 80/443 needed — NSG only allows SSH.
+// Deploys: VNet, NSG, public IP, NIC, B1ms VM with managed identity
+// Caddy handles TLS — ports 80 (ACME challenge) and 443 (HTTPS) are open.
 
 targetScope = 'resourceGroup'
 
@@ -55,6 +55,34 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
   properties: {
     securityRules: [
       {
+        name: 'AllowHTTP'
+        properties: {
+          priority: 900
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '80'
+          description: 'HTTP — required for Caddy Let\'s Encrypt ACME challenge'
+        }
+      }
+      {
+        name: 'AllowHTTPS'
+        properties: {
+          priority: 910
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+          description: 'HTTPS — Vaultwarden via Caddy reverse proxy'
+        }
+      }
+      {
         name: 'AllowSSH'
         properties: {
           priority: 1000
@@ -65,21 +93,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
           destinationPortRange: '22'
-          description: 'SSH management access — restrict to your IP in production'
-        }
-      }
-      {
-        name: 'DenyAllInbound'
-        properties: {
-          priority: 4096
-          protocol: '*'
-          access: 'Deny'
-          direction: 'Inbound'
-          sourceAddressPrefix: '*'
-          sourcePortRange: '*'
-          destinationAddressPrefix: '*'
-          destinationPortRange: '*'
-          description: 'Explicit deny-all — Vaultwarden is only reachable via Cloudflare Tunnel'
+          description: 'SSH management — restrict allowSshFromIP to your IP for best security'
         }
       }
     ]

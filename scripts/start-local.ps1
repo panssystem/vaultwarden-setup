@@ -19,7 +19,7 @@ if (-not (Test-Path $envFile)) {
 Set-Location $projectRoot
 
 Write-Host "Starting Vaultwarden + Caddy..."
-docker compose up -d
+docker compose --profile caddy up -d
 
 Write-Host ""
 Write-Host "Waiting for services to be healthy..."
