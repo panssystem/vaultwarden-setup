@@ -72,10 +72,14 @@ TIMESTAMP=$(date +%F-%H%M)
 ARCHIVE="${BACKUP_DIR}/vw-data-${TIMESTAMP}.tar.gz"
 mkdir -p "$BACKUP_DIR"
 
-# Flush SQLite WAL to ensure a clean snapshot
-if docker inspect vaultwarden &>/dev/null 2>&1; then
-  docker exec vaultwarden sqlite3 /data/db.sqlite3 "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
-fi
+# Flush SQLite WAL so the main db file is self-contained before we snapshot it.
+# The vaultwarden image has no sqlite3 CLI, so we use a throwaway alpine container.
+# The WAL and SHM files are included in the tar anyway, so recovery works either
+# way — this is just a belt-and-suspenders cleanliness step.
+docker run --rm \
+  -v vaultwarden-setup_vw-data:/data \
+  alpine sh -c 'apk add -q --no-cache sqlite && sqlite3 /data/db.sqlite3 "PRAGMA wal_checkpoint(TRUNCATE);"' \
+  2>/dev/null || true
 
 # Create local archive from the live volume (read-only mount)
 docker run --rm \
