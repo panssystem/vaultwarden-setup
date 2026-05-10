@@ -51,9 +51,25 @@ if [[ ! -f "$PARAMETERS_FILE" ]]; then
 fi
 
 # ── Cloud-init script ─────────────────────────────────────────────────────────
+# customData is immutable on existing VMs — ARM rejects any change to it.
+# We skip the parameter on re-deployments; Bicep sets customData to null when
+# cloudInitScript is empty, and ARM treats null as "leave unchanged" in
+# incremental mode, so the existing cloud-init payload is preserved.
 
 SETUP_SCRIPT="$REPO_ROOT/scripts/setup-server.sh"
 CLOUD_INIT_B64=$(base64 -w 0 "$SETUP_SCRIPT")
+
+# Read namePrefix from parameters.json (fall back to Bicep default)
+NAME_PREFIX=$(python3 -c "
+import json, sys
+d = json.load(open('$PARAMETERS_FILE'))
+print(d.get('parameters', {}).get('namePrefix', {}).get('value', 'vaultwarden'))
+" 2>/dev/null || echo "vaultwarden")
+VM_EXISTS=false
+if az vm show --resource-group "$RESOURCE_GROUP" --name "${NAME_PREFIX}-vm" --output none 2>/dev/null; then
+  VM_EXISTS=true
+  echo "Existing VM detected — cloud-init will not be re-applied (immutable after first boot)."
+fi
 
 # ── Resource group ────────────────────────────────────────────────────────────
 
@@ -66,12 +82,17 @@ az group create \
 # ── Deploy Bicep ──────────────────────────────────────────────────────────────
 
 echo "Deploying Bicep template..."
+CLOUD_INIT_ARGS=()
+if [[ "$VM_EXISTS" == "false" ]]; then
+  CLOUD_INIT_ARGS=(--parameters "cloudInitScript=$CLOUD_INIT_B64")
+fi
+
 DEPLOY_OUTPUT=$(az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --template-file "$SCRIPT_DIR/main.bicep" \
   --parameters "@$PARAMETERS_FILE" \
   --parameters sshPublicKey="$SSH_PUBLIC_KEY" \
-  --parameters cloudInitScript="$CLOUD_INIT_B64" \
+  "${CLOUD_INIT_ARGS[@]}" \
   --output json)
 
 VM_IP=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['properties']['outputs']['vmPublicIP']['value'])" 2>/dev/null || echo "unknown")
