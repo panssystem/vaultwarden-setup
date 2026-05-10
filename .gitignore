@@ -1,0 +1,22 @@
+# Local environment files (contain secrets)
+.env
+.env.local
+.env.prod
+
+# Vaultwarden data
+vw-data/
+
+# Caddy auto-generated certs/config
+caddy-data/
+caddy-config/
+
+# Docker override files
+docker-compose.override.yml
+
+# Kubernetes secrets
+k8s/secrets.yaml
+k8s/secret-*.yaml
+
+# OS
+.DS_Store
+Thumbs.db
