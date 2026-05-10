@@ -14,6 +14,11 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 command -v az  >/dev/null 2>&1 || { echo "ERROR: Azure CLI not found. Install from https://aka.ms/installazurecli"; exit 1; }
 command -v ssh-keygen >/dev/null 2>&1 || { echo "ERROR: ssh-keygen not found."; exit 1; }
 
+echo "Ensuring Bicep CLI is installed..."
+az bicep install 2>/dev/null || az bicep upgrade 2>/dev/null || true
+echo "Bicep version: $(az bicep version 2>/dev/null || echo 'unknown')"
+echo ""
+
 echo "Checking Azure login..."
 az account show --output none 2>/dev/null || { echo "Not logged in. Running 'az login'..."; az login; }
 

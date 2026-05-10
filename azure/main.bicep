@@ -65,7 +65,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
           destinationPortRange: '80'
-          description: 'HTTP — required for Caddy Let\'s Encrypt ACME challenge'
+          description: 'HTTP — required for Caddy Let''s Encrypt ACME challenge'
         }
       }
       {
@@ -118,7 +118,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
       {
         name: 'ipconfig1'
         properties: {
-          subnet: { id: vnet.properties.subnets[0].id }
+          subnet: { id: '${vnet.id}/subnets/default' }
           publicIPAddress: { id: publicIp.id }
           privateIPAllocationMethod: 'Dynamic'
         }
