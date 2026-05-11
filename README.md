@@ -1,121 +1,254 @@
 # Vaultwarden Setup
 
-Self-hosted Bitwarden-compatible password manager using [Vaultwarden](https://github.com/dani-garcia/vaultwarden).
-Runs behind a [Caddy](https://caddyserver.com/) reverse proxy that handles HTTPS automatically.
+Self-hosted Bitwarden-compatible password manager using [Vaultwarden](https://github.com/dani-garcia/vaultwarden), running behind a [Caddy](https://caddyserver.com/) reverse proxy with automatic HTTPS.
 
-## Quick start (local)
+## Table of contents
+
+- [Quick start — local](#quick-start--local)
+- [Configuration](#configuration)
+- [Docker Compose profiles](#docker-compose-profiles)
+- [Production — Azure deployment](#production--azure-deployment)
+- [Security hardening](#security-hardening)
+- [Backups](#backups)
+- [Restoring from a backup](#restoring-from-a-backup)
+- [Architecture](#architecture)
+
+---
+
+## Quick start — local
 
 ```powershell
-# 1. Copy and configure environment
+# 1. Copy and configure environment (defaults work for local testing)
 cp .env.example .env
-# Edit .env — defaults work for local testing
 
-# 2. Start
+# 2. Start Vaultwarden + Caddy
 .\scripts\start-local.ps1
 
-# 3. Open https://localhost in your browser
-# If you see a cert warning, trust the Caddy CA:
+# 3. Open https://localhost
+# First visit: trust the Caddy self-signed CA if your browser warns:
 docker exec vaultwarden-caddy caddy trust
 ```
 
-Vaultwarden will be available at **https://localhost**.  
-Admin panel: **https://localhost/admin** (requires ADMIN_TOKEN in .env).
+**https://localhost** — web vault  
+**https://localhost/admin** — admin panel (requires `ADMIN_TOKEN` in `.env`)
 
-## Stopping
+### Stop
 
 ```powershell
-docker compose down          # keep data
-docker compose down -v       # also delete volumes (destroys vault data)
+docker compose down        # keep data
+docker compose down -v     # delete volumes too (destroys vault data)
 ```
+
+---
 
 ## Configuration
 
-All settings live in `.env` (copied from `.env.example`).
+All settings live in `.env` (copy from `.env.example`).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DOMAIN` | `https://localhost` | Full URL including protocol |
-| `SIGNUPS_ALLOWED` | `true` | Disable after creating your account |
-| `ADMIN_TOKEN` | *(empty)* | Argon2 hash — see below |
+| `DOMAIN` | `https://localhost` | Full URL including `https://` |
+| `SIGNUPS_ALLOWED` | `true` | Set to `false` after creating your accounts |
+| `ADMIN_TOKEN` | *(empty)* | Argon2id hash — see below |
+| `ADMIN_ALLOWED_IP` | `127.0.0.1` | IP allowed to reach `/admin` — set to your public IP in production |
 | `LOG_LEVEL` | `info` | `warn` or `error` for production |
+| `TZ` | `America/Chicago` | Timezone for Fail2Ban log timestamps |
 
 ### Generate an admin token
 
-```powershell
-.\scripts\generate-admin-token.ps1
-# or manually:
-docker run --rm -it vaultwarden/server /vaultwarden hash --preset owasp
+```bash
+docker exec -it vaultwarden /vaultwarden hash --preset owasp
 ```
 
-Paste the resulting `$argon2id$...` string as `ADMIN_TOKEN` in `.env`.
+Paste the full `$argon2id$...` string as `ADMIN_TOKEN=` in `.env`, then restart:
 
-## Production (custom domain)
-
-1. Point your domain DNS to the server's IP.
-2. Set `DOMAIN=https://your.domain.com` in `.env`.
-3. Make sure ports 80 and 443 are open.
-4. Run `docker compose up -d` — Caddy fetches a Let's Encrypt cert automatically.
-
-After your first login, set `SIGNUPS_ALLOWED=false` in `.env` and restart:
-```powershell
-docker compose up -d
+```bash
+docker compose --profile caddy restart vaultwarden
 ```
 
-## Restoring data from a failed installation
+---
 
-If you have a backup of the Vaultwarden `/data` directory:
+## Docker Compose profiles
 
-```powershell
-# Copy your backup into the Docker volume
-docker run --rm -v vaultwarden-setup_vw-data:/data -v C:\path\to\backup:/backup alpine `
-  sh -c "cp -av /backup/. /data/"
+| Profile | Services | Use case |
+|---|---|---|
+| `caddy` | Vaultwarden + Caddy + Fail2Ban | Local dev and direct-TLS production |
+| `tunnel` | Vaultwarden + cloudflared + Fail2Ban | Cloudflare Tunnel (no open ports needed) |
 
-docker compose up -d
+```bash
+# Local / direct-TLS production
+docker compose --profile caddy up -d
+
+# Cloudflare Tunnel (set CLOUDFLARE_TUNNEL_TOKEN in .env first)
+docker compose --profile tunnel up -d
 ```
 
-If you have a `.tar.gz` backup made by `scripts\backup.ps1`:
-```powershell
-docker run --rm -v vaultwarden-setup_vw-data:/data -v C:\path\to\backups:/backup alpine `
-  tar xzf /backup/vaultwarden-backup-YYYY-MM-DD_HHMMSS.tar.gz -C /data
-docker compose up -d
+Caddy automatically issues a self-signed cert for `localhost` and a Let's Encrypt cert for any real domain — no extra config needed.
+
+---
+
+## Production — Azure deployment
+
+The `azure/` directory contains a Bicep template and deploy script that provision everything needed:
+
+- VNet, NSG (ports 22/80/443), static public IP, NIC
+- Ubuntu 24.04 LTS B1ms VM with system-assigned managed identity
+- Standard_LRS Cool-tier storage account for encrypted-at-rest backups
+- Role assignment granting the VM write access to the backup container
+
+### Prerequisites
+
+- [Azure CLI](https://aka.ms/installazurecli) installed and logged in (`az login`)
+- An Azure subscription
+- DNS A record for your domain pointing to the VM's public IP (after first deploy)
+
+### Deploy
+
+```bash
+# First deploy — creates all resources and provisions the VM via cloud-init
+bash azure/deploy.sh vaultwarden-rg eastus
+
+# Re-deploy — safe to run again; adds/updates resources without touching the VM OS
+bash azure/deploy.sh vaultwarden-rg eastus
 ```
 
-## Backup
+The script:
+1. Creates or updates the resource group and all Azure resources
+2. Generates an SSH key pair at `~/.ssh/vaultwarden_azure` if one doesn't exist
+3. Runs cloud-init on first boot to install Docker, configure the system, and install the backup cron job
+4. Writes the backup storage account name to `/etc/vaultwarden-backup.conf` on the VM
+5. Prints the VM IP, SSH command, and backup storage account
 
-```powershell
-.\scripts\backup.ps1
-# Saves a timestamped tar.gz to ./backups/
+### After first deploy
+
+```bash
+# SSH in (cloud-init takes ~2 minutes)
+ssh -i ~/.ssh/vaultwarden_azure azureuser@<VM_IP>
+
+# Watch cloud-init progress
+tail -f /var/log/cloud-init-output.log
+
+# Configure Vaultwarden
+cd /opt/vaultwarden-setup
+cp .env.example .env
+nano .env   # set DOMAIN, ADMIN_TOKEN, ADMIN_ALLOWED_IP, SIGNUPS_ALLOWED=false
+
+# Start
+docker compose --profile caddy up -d
 ```
 
-Schedule this daily with Windows Task Scheduler or a cron job.
+### Customize deployment
 
-## Kubernetes
+Copy `azure/parameters.example.json` to `azure/parameters.json` and edit:
 
-See the `k8s/` directory for manifests. Requires:
-- `nginx-ingress-controller`
-- `cert-manager` with a `letsencrypt-prod` ClusterIssuer
+| Parameter | Default | Notes |
+|---|---|---|
+| `vmSize` | `Standard_B1ms` | 1 vCPU / 2 GB — sweet spot for 1–5 users (~$14/mo) |
+| `osDiskSizeGB` | `30` | OS disk size |
+| `allowSshFromIP` | `*` | Restrict to your public IP for best security |
 
-```powershell
-# 1. Edit k8s/configmap.yaml — set your DOMAIN
-# 2. Copy and fill in k8s/secret.example.yaml → k8s/secret.yaml
-# 3. Apply
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/pvc.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/secret.yaml
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
-kubectl apply -f k8s/ingress.yaml
+---
+
+## Security hardening
+
+Checklist for a production deployment:
+
+- [ ] `SIGNUPS_ALLOWED=false` in `.env` after creating your accounts
+- [ ] `ADMIN_TOKEN` set to an argon2id hash (not empty)
+- [ ] `ADMIN_ALLOWED_IP` set to your public IP in `.env`
+- [ ] `allowSshFromIP` in `azure/parameters.json` set to your IP (not `*`)
+- [ ] 2FA enabled on your Vaultwarden account (Settings → Security → Two-step login)
+- [ ] Fail2Ban running — verify with:
+  ```bash
+  docker exec vaultwarden-fail2ban fail2ban-client status
+  ```
+
+See `fail2ban/README.md` for Fail2Ban details and Cloudflare Tunnel integration notes.
+
+---
+
+## Backups
+
+### Automatic (production VM)
+
+A daily cron job runs at **02:30 UTC** and:
+
+1. Creates a compacted, WAL-free SQLite snapshot using `VACUUM INTO`
+2. Archives that snapshot plus all other volume data (RSA keys, attachments, sends, config) — excluding `icon_cache` which is auto-regenerated
+3. Saves a timestamped `.tar.gz` to `/opt/backups/` (30-day local retention)
+4. Uploads to Azure Blob Storage (`vw-backups` container) using the VM's managed identity — no credentials stored anywhere
+
+```bash
+# Run a backup manually
+sudo /opt/vaultwarden-backup.sh
+
+# Check recent backups
+ls -lh /opt/backups/
+
+# View backup log
+tail -f /var/log/vw-backup.log
 ```
+
+The Azure storage account name is stored in `/etc/vaultwarden-backup.conf` (written by `deploy.sh`).
+
+### Manual vault export (portability)
+
+For a portable backup importable into any Bitwarden-compatible client, export from the web vault:
+
+**Settings → Vault → Export vault**
+
+Store the exported file somewhere safe and separate from the server.
+
+---
+
+## Restoring from a backup
+
+```bash
+# Stop Vaultwarden
+docker compose down
+
+# Restore from a local backup archive
+docker run --rm \
+  -v vaultwarden-setup_vw-data:/data \
+  -v /opt/backups:/backup \
+  alpine tar xzf /backup/vw-data-YYYY-MM-DD-HHMM.tar.gz -C /data
+
+# Start again
+docker compose --profile caddy up -d
+```
+
+To restore from Azure Blob Storage, download the archive first:
+
+```bash
+az storage blob download \
+  --account-name <storage-account-name> \
+  --container-name vw-backups \
+  --name vw-data-YYYY-MM-DD-HHMM.tar.gz \
+  --file /opt/backups/vw-data-YYYY-MM-DD-HHMM.tar.gz \
+  --auth-mode login
+```
+
+---
 
 ## Architecture
 
 ```
-Browser → Caddy (443/TLS) → Vaultwarden (80, internal)
-                ↑
-         Automatic HTTPS:
-         localhost → self-signed CA (caddy trust)
-         domain    → Let's Encrypt
-```
+Internet
+   │
+   ├─ :443 (HTTPS) ──► Caddy ──► Vaultwarden:80
+   │                     │
+   │              Let's Encrypt (real domain)
+   │              self-signed CA (localhost)
+   │
+   └─ :22 (SSH) ──► VM (restricted by NSG allowSshFromIP)
 
-Data persists in Docker named volume `vw-data`.
+Fail2Ban monitors Vaultwarden logs and applies iptables bans
+for repeated login failures (vault: 5/10min → 1hr ban,
+admin: 3/10min → 24hr ban, SSH: 5 failures → 1hr ban).
+
+Optional: replace Caddy with Cloudflare Tunnel (profile: tunnel)
+— no inbound ports needed, see docs/cloudflare-setup.md.
+
+Data: Docker named volume vw-data (persists across restarts)
+Backups: daily tar.gz → /opt/backups/ + Azure Blob Storage
+```

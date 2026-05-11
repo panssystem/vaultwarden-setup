@@ -1,6 +1,7 @@
 # Fail2Ban for Vaultwarden
 
 Fail2Ban monitors `vaultwarden.log` and bans IPs that repeatedly fail login.
+It runs as part of both the `caddy` and `tunnel` Docker Compose profiles.
 
 ## How it works
 
