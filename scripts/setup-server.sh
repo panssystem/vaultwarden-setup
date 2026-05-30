@@ -61,48 +61,75 @@ mkdir -p /opt/backups
 
 cat > /opt/vaultwarden-backup.sh << 'BACKUP_SCRIPT'
 #!/usr/bin/env bash
-# Daily backup of vaultwarden data volume.
-# - Creates a local tar.gz in /opt/backups (keeps 30 days)
-# - Uploads to Azure Blob Storage using the VM's managed identity (no credentials needed)
-# Storage account name is read from /etc/vaultwarden-backup.conf (written by deploy.sh)
+# Daily backup of all service data volumes (Vaultwarden + Grocy).
+# - VACUUM INTO for each SQLite database: compact, WAL-free, safe on live containers
+# - tar archive of remaining volume data (RSA keys, attachments, config, etc.)
+# - Local retention: 30 days in /opt/backups
+# - Remote: Azure Blob Storage via VM managed identity (no credentials stored)
+# Config: /etc/vaultwarden-backup.conf (written by deploy.sh)
 set -euo pipefail
 
 BACKUP_DIR=/opt/backups
 TIMESTAMP=$(date +%F-%H%M)
-ARCHIVE="${BACKUP_DIR}/vw-data-${TIMESTAMP}.tar.gz"
 mkdir -p "$BACKUP_DIR"
 
-# Step 1 — VACUUM INTO: compacts the database and writes a clean, WAL-free snapshot.
-# Safe on a live database — SQLite takes an internal consistent read; vaultwarden
-# keeps running normally. The vaultwarden image has no sqlite3 CLI, so we use a
-# throwaway alpine container. Output goes directly to the backup dir.
-docker run --rm \
-  -v vaultwarden-setup_vw-data:/data:ro \
-  -v "${BACKUP_DIR}:/backup" \
-  alpine sh -c "apk add -q --no-cache sqlite && sqlite3 /data/db.sqlite3 \"VACUUM INTO '/backup/db.sqlite3';\""
+# ── backup_volume: back up one Docker volume ──────────────────────────────────
+# Args:
+#   $1  archive prefix   e.g. "vaultwarden" → vaultwarden-data-TIMESTAMP.tar.gz
+#   $2  docker volume    e.g. "vaultwarden-setup_vw-data"
+#   $3  db path in vol   e.g. "db.sqlite3" or "data/grocy.db" (relative to vol root)
+#   $@  extra tar excludes (relative paths, no leading ./)
+backup_volume() {
+  local prefix="$1" volume="$2" db_relpath="$3"
+  shift 3
+  local archive="${BACKUP_DIR}/${prefix}-data-${TIMESTAMP}.tar.gz"
+  local tmpdir
+  tmpdir=$(mktemp -d "${BACKUP_DIR}/.tmp-${prefix}-XXXXX")
 
-# Step 2 — tar: archive the vacuumed db (from backup dir) + everything else in the
-# volume. We skip the live db files (replaced by the vacuum copy), the WAL/SHM
-# (consolidated by VACUUM INTO), and icon_cache (large, auto-regenerated on start).
-docker run --rm \
-  -v vaultwarden-setup_vw-data:/data:ro \
-  -v "${BACKUP_DIR}:/backup" \
-  alpine tar czf "/backup/vw-data-${TIMESTAMP}.tar.gz" \
-    -C /backup db.sqlite3 \
-    -C /data \
-    --exclude="./db.sqlite3" \
-    --exclude="./db.sqlite3-wal" \
-    --exclude="./db.sqlite3-shm" \
-    --exclude="./icon_cache" \
-    .
+  echo "  Backing up ${prefix}..."
 
-# Remove the standalone vacuum copy — it's now inside the archive
-rm -f "${BACKUP_DIR}/db.sqlite3"
+  # VACUUM INTO: write a compacted, WAL-free db snapshot into a mirrored path
+  # inside tmpdir so it lands at the correct location when tar'd.
+  mkdir -p "${tmpdir}/$(dirname "$db_relpath")"
+  docker run --rm \
+    -v "${volume}:/vol:ro" \
+    -v "${tmpdir}:/tmp-backup" \
+    alpine sh -c "apk add -q --no-cache sqlite \
+      && sqlite3 /vol/${db_relpath} \"VACUUM INTO '/tmp-backup/${db_relpath}';\""
 
-echo "Local backup: ${ARCHIVE} ($(du -sh "$ARCHIVE" | cut -f1))"
+  # tar: vacuum'd db (correct relative path) + everything else from the volume,
+  # excluding the live db files (replaced) and any caller-specified paths.
+  docker run --rm \
+    -v "${volume}:/vol:ro" \
+    -v "${tmpdir}:/tmp-backup:ro" \
+    -v "${BACKUP_DIR}:/backup" \
+    alpine tar czf "/backup/${prefix}-data-${TIMESTAMP}.tar.gz" \
+      -C /tmp-backup "${db_relpath}" \
+      -C /vol \
+      --exclude="./${db_relpath}" \
+      --exclude="./${db_relpath}-wal" \
+      --exclude="./${db_relpath}-shm" \
+      $(printf -- '--exclude=./%s ' "$@") \
+      .
 
-# Prune local archives older than 30 days
-find "$BACKUP_DIR" -name "vw-data-*.tar.gz" -mtime +30 -delete
+  rm -rf "$tmpdir"
+  echo "    ${archive} ($(du -sh "$archive" | cut -f1))"
+}
+
+# ── Vaultwarden ───────────────────────────────────────────────────────────────
+backup_volume "vaultwarden" \
+  "vaultwarden-setup_vw-data" \
+  "db.sqlite3" \
+  "icon_cache"
+
+# ── Grocy ─────────────────────────────────────────────────────────────────────
+# linuxserver/grocy stores its database at /config/data/grocy.db
+backup_volume "grocy" \
+  "vaultwarden-setup_grocy-data" \
+  "data/grocy.db"
+
+# ── Prune local archives older than 30 days ───────────────────────────────────
+find "$BACKUP_DIR" -name "*-data-*.tar.gz" -mtime +30 -delete
 
 # ── Upload to Azure Blob Storage ──────────────────────────────────────────────
 # Reads storage account name from config written by deploy.sh.
@@ -126,18 +153,24 @@ TOKEN=$(curl -sf \
   "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fstorage.azure.com%2F" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
-BLOB_NAME="vw-data-${TIMESTAMP}.tar.gz"
-UPLOAD_URL="https://${BACKUP_STORAGE_ACCOUNT}.blob.core.windows.net/vw-backups/${BLOB_NAME}"
+# Upload helper: posts one archive to the blob container
+upload_blob() {
+  local file="$1"
+  local blob_name
+  blob_name=$(basename "$file")
+  curl -sf -X PUT \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "x-ms-version: 2020-04-08" \
+    -H "x-ms-blob-type: BlockBlob" \
+    -H "Content-Type: application/gzip" \
+    --data-binary @"${file}" \
+    "https://${BACKUP_STORAGE_ACCOUNT}.blob.core.windows.net/vw-backups/${blob_name}"
+  echo "  Uploaded: ${blob_name}"
+}
 
-curl -sf -X PUT \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "x-ms-version: 2020-04-08" \
-  -H "x-ms-blob-type: BlockBlob" \
-  -H "Content-Type: application/gzip" \
-  --data-binary @"${ARCHIVE}" \
-  "${UPLOAD_URL}"
-
-echo "Uploaded to Azure: ${UPLOAD_URL}"
+echo "Uploading to Azure (${BACKUP_STORAGE_ACCOUNT}/vw-backups)..."
+upload_blob "${BACKUP_DIR}/vaultwarden-data-${TIMESTAMP}.tar.gz"
+upload_blob "${BACKUP_DIR}/grocy-data-${TIMESTAMP}.tar.gz"
 BACKUP_SCRIPT
 
 chmod +x /opt/vaultwarden-backup.sh

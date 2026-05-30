@@ -1,15 +1,18 @@
-# Caddy reverse proxy for Vaultwarden
-# DOMAIN env var controls the hostname Caddy serves.
-# - Local:      DOMAIN=localhost   → self-signed cert trusted by Caddy's local CA
-# - Production: DOMAIN=vault.example.com → automatic Let's Encrypt cert
+# Caddy reverse proxy for Vaultwarden and Grocy.
+# Env vars (set in .env, passed through docker-compose.yml):
+#   DOMAIN            — Vaultwarden hostname (e.g. vault.kaosklan.net or localhost)
+#   GROCY_DOMAIN      — Grocy hostname       (e.g. grocy.kaosklan.net or grocy.localhost)
+#   ADMIN_ALLOWED_IP  — IP allowed to reach Vaultwarden /admin (default: 127.0.0.1)
 #
-# ADMIN_ALLOWED_IP env var restricts /admin to a specific IP (e.g. your home IP).
-# Defaults to 127.0.0.1 (localhost only) if not set — effectively blocks remote access.
-# Set to your public IP in .env: ADMIN_ALLOWED_IP=1.2.3.4
+# Caddy auto-issues:
+#   localhost / *.localhost → self-signed cert (caddy trust to install CA)
+#   real domain             → Let's Encrypt cert
+
+# ── Vaultwarden ───────────────────────────────────────────────────────────────
 
 {$DOMAIN:localhost} {
 
-    # ── /admin — restricted to ADMIN_ALLOWED_IP ──────────────────────────────
+    # /admin — restricted to ADMIN_ALLOWED_IP
     @admin path /admin*
     handle @admin {
         @allowed_admin remote_ip {$ADMIN_ALLOWED_IP:127.0.0.1}
@@ -23,14 +26,13 @@
         respond 403
     }
 
-    # ── All other traffic ─────────────────────────────────────────────────────
+    # All other traffic
     reverse_proxy vaultwarden:80 {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
 
-    # Security headers
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options "nosniff"
@@ -38,7 +40,29 @@
         Referrer-Policy "no-referrer"
     }
 
-    # Logging
+    log {
+        output stdout
+        format console
+    }
+}
+
+# ── Grocy ─────────────────────────────────────────────────────────────────────
+
+{$GROCY_DOMAIN:grocy.localhost} {
+
+    reverse_proxy grocy:80 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "no-referrer"
+    }
+
     log {
         output stdout
         format console
