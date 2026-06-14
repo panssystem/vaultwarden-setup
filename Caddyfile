@@ -1,7 +1,8 @@
-# Caddy reverse proxy for Vaultwarden and Grocy.
+# Caddy reverse proxy for Vaultwarden, Grocy, and CouchDB.
 # Env vars (set in .env, passed through docker-compose.yml):
 #   DOMAIN            — Vaultwarden hostname (e.g. vault.kaosklan.net or localhost)
 #   GROCY_DOMAIN      — Grocy hostname       (e.g. grocy.kaosklan.net or grocy.localhost)
+#   OBSIDIAN_DOMAIN   — CouchDB hostname     (e.g. obsidian.kaosklan.net or obsidian.localhost)
 #   ADMIN_ALLOWED_IP  — IP allowed to reach Vaultwarden /admin (default: 127.0.0.1)
 #
 # Caddy auto-issues:
@@ -51,6 +52,32 @@
 {$GROCY_DOMAIN:grocy.localhost} {
 
     reverse_proxy grocy:80 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "no-referrer"
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
+
+# ── CouchDB (Obsidian LiveSync) ────────────────────────────────────────────
+# Authentication is handled by CouchDB itself (COUCHDB_USER/PASSWORD).
+# Devices connect from anywhere, so this relies on HTTPS + a strong password
+# rather than IP restriction.
+
+{$OBSIDIAN_DOMAIN:obsidian.localhost} {
+
+    reverse_proxy couchdb:5984 {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
