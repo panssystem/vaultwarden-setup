@@ -188,12 +188,23 @@ services:
       PGID: 1000
       TZ: ${TZ:-UTC}
     volumes:
-      - ./fail2ban:/config/fail2ban:ro         # jail + filter configs
+      # /config must be writable: on first run the image seeds it with its
+      # full default config set (fail2ban.conf, jail.conf, filter.d/sshd.conf,
+      # action.d/*.conf, etc.) and writes its own log under /config/log.
+      # A read-only mount here leaves /etc/fail2ban incomplete and the
+      # server fails to start (missing actions/filters, can't open its log).
+      - fail2ban-config:/config
+      # Our jail/filter definitions, copied into /config/fail2ban by
+      # custom-cont-init.d/10-vaultwarden-config.sh (see that file for why).
+      - ./fail2ban:/our-config:ro
+      - ./fail2ban/custom-cont-init.d:/custom-cont-init.d:ro
       - vw-data:/vaultwarden-data:ro           # read vaultwarden.log
       - /var/log:/var/log:ro                   # OS logs (for sshd jail)
 
 volumes:
   vw-data:
+    driver: local
+  fail2ban-config:
     driver: local
   grocy-data:
     driver: local
