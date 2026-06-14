@@ -105,13 +105,14 @@ Caddy automatically issues a self-signed cert for `localhost` and a Let's Encryp
    - **URI**: `https://<OBSIDIAN_DOMAIN>`
    - **Username** / **Password**: your `COUCHDB_USER` / `COUCHDB_PASSWORD`
    - **Database name**: any name, e.g. `obsidian-vault`
-5. Click **Test Database Connection**, then **Check Database Configuration** and apply any suggested fixes (CORS, chunk size, etc.) — the plugin configures CouchDB automatically.
+5. Click **Test Database Connection**, then **Check Database Configuration** and apply any remaining suggested fixes (chunk size, etc.).
 6. **First device only**: click **Check and Fix**, then **Replicate**.
 7. **Every other device**: same plugin setup, then click **Fetch** on first connect.
 
 Notes:
 - CouchDB has no IP restriction (unlike `/admin`) since sync clients connect from many networks. Security relies on HTTPS + your CouchDB password — keep it strong.
 - The Fauxton admin UI is reachable at `https://<OBSIDIAN_DOMAIN>/_utils` if you need to inspect databases directly.
+- CORS is pre-configured for the LiveSync plugin's origins (`app://obsidian.md`, `capacitor://localhost`, `http://localhost`) on every container start. If you previously used the plugin's "Check Database Configuration → Fix" button and saw a "CORS is not allowing credentials" error (a known issue when that fix sets `cors/origins` to `*`, which browsers reject when credentials are included — [obsidian-livesync#613](https://github.com/vrtmrz/obsidian-livesync/issues/613)), pull this update and recreate the container: `docker compose --profile caddy up -d --force-recreate couchdb`.
 
 ---
 

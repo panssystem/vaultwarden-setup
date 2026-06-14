@@ -60,8 +60,16 @@ services:
   # ─────────────────────────────────────────────
   # CouchDB — backend for Obsidian Self-hosted LiveSync.
   # Runs in caddy profile alongside Vaultwarden/Grocy.
-  # Accessible at OBSIDIAN_DOMAIN (see .env). Use the
-  # LiveSync plugin's setup wizard to configure CORS etc.
+  # Accessible at OBSIDIAN_DOMAIN (see .env). CORS is
+  # pre-configured on every start (see entrypoint below) so the
+  # LiveSync plugin's "Check Database Configuration" step finds
+  # everything already correct.
+  #
+  # cors/origins MUST list specific origins, not "*" — browsers
+  # reject `Access-Control-Allow-Origin: *` combined with
+  # `Access-Control-Allow-Credentials: true`, which surfaces in the
+  # LiveSync plugin as "CORS is not allowing credentials":
+  # https://github.com/vrtmrz/obsidian-livesync/issues/613
   # ─────────────────────────────────────────────
   couchdb:
     profiles: ["caddy"]
@@ -71,6 +79,23 @@ services:
     environment:
       COUCHDB_USER: ${COUCHDB_USER:-admin}
       COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:?Set COUCHDB_PASSWORD in .env}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        cat > /opt/couchdb/etc/local.d/10-livesync.ini <<'EOF'
+        [chttpd]
+        enable_cors = true
+
+        [httpd]
+        enable_cors = true
+
+        [cors]
+        origins = app://obsidian.md, capacitor://localhost, http://localhost
+        credentials = true
+        methods = GET, PUT, POST, HEAD, DELETE
+        headers = accept, authorization, content-type, origin, referer
+        EOF
+        exec /docker-entrypoint.sh /opt/couchdb/bin/couchdb
     volumes:
       - couchdb-data:/opt/couchdb/data
       - couchdb-config:/opt/couchdb/etc/local.d
