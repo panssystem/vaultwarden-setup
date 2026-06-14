@@ -3,6 +3,17 @@
 Fail2Ban monitors `vaultwarden.log` and bans IPs that repeatedly fail login.
 It runs as part of both the `caddy` and `tunnel` Docker Compose profiles.
 
+## Configuration layout
+
+The container's `/config` is a named volume (`fail2ban-config`) so the image
+can seed it with its full default config on first run (`fail2ban.conf`,
+`jail.conf`, `filter.d/sshd.conf`, `action.d/*.conf`, etc.) and write its own
+log there. `jail.local` and `filter.d/vaultwarden.conf` in this directory are
+bind-mounted read-only to `/our-config` and copied into `/config/fail2ban` by
+`custom-cont-init.d/10-vaultwarden-config.sh` on every container start — so
+edits here take effect after `docker compose --profile caddy up -d
+--force-recreate fail2ban`.
+
 ## How it works
 
 - **5 vault login failures** in 10 minutes → IP banned for 1 hour
