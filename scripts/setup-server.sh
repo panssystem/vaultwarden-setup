@@ -128,6 +128,53 @@ backup_volume "grocy" \
   "vaultwarden-setup_grocy-data" \
   "data/grocy.db"
 
+# ── CouchDB (Obsidian LiveSync) ────────────────────────────────────────────────
+# CouchDB isn't SQLite, so VACUUM INTO doesn't apply. Instead, dump each
+# user database's documents via the HTTP API (_all_docs) — a consistent,
+# portable snapshot that's safe to take against a live server.
+backup_couchdb() {
+  local prefix="couchdb"
+  local archive="${BACKUP_DIR}/${prefix}-data-${TIMESTAMP}.tar.gz"
+  local tmpdir
+  tmpdir=$(mktemp -d "${BACKUP_DIR}/.tmp-${prefix}-XXXXX")
+
+  echo "  Backing up ${prefix}..."
+
+  if ! docker ps --format '{{.Names}}' | grep -qx couchdb; then
+    echo "    WARN: couchdb container not running — skipping."
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  local env_file="/opt/vaultwarden-setup/.env"
+  local user pass
+  user=$(grep -E '^COUCHDB_USER=' "$env_file" | cut -d= -f2-)
+  pass=$(grep -E '^COUCHDB_PASSWORD=' "$env_file" | cut -d= -f2-)
+  if [[ -z "$user" || -z "$pass" ]]; then
+    echo "    WARN: COUCHDB_USER/PASSWORD not set in .env — skipping."
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  local dbs
+  dbs=$(docker run --rm --network vaultwarden-setup_vw-internal alpine sh -c \
+    "apk add -q --no-cache curl && curl -sf -u '${user}:${pass}' http://couchdb:5984/_all_dbs" \
+    | python3 -c "import sys,json; print('\n'.join(d for d in json.load(sys.stdin) if not d.startswith('_')))")
+
+  for db in $dbs; do
+    docker run --rm --network vaultwarden-setup_vw-internal \
+      -v "${tmpdir}:/out" alpine sh -c \
+      "apk add -q --no-cache curl && curl -sf -u '${user}:${pass}' 'http://couchdb:5984/${db}/_all_docs?include_docs=true' -o '/out/${db}.json'"
+  done
+
+  docker run --rm -v "${tmpdir}:/tmp-backup:ro" -v "${BACKUP_DIR}:/backup" \
+    alpine tar czf "/backup/${prefix}-data-${TIMESTAMP}.tar.gz" -C /tmp-backup .
+
+  rm -rf "$tmpdir"
+  echo "    ${archive} ($(du -sh "$archive" | cut -f1))"
+}
+backup_couchdb
+
 # ── Prune local archives older than 30 days ───────────────────────────────────
 find "$BACKUP_DIR" -name "*-data-*.tar.gz" -mtime +30 -delete
 
@@ -171,6 +218,9 @@ upload_blob() {
 echo "Uploading to Azure (${BACKUP_STORAGE_ACCOUNT}/vw-backups)..."
 upload_blob "${BACKUP_DIR}/vaultwarden-data-${TIMESTAMP}.tar.gz"
 upload_blob "${BACKUP_DIR}/grocy-data-${TIMESTAMP}.tar.gz"
+if [[ -f "${BACKUP_DIR}/couchdb-data-${TIMESTAMP}.tar.gz" ]]; then
+  upload_blob "${BACKUP_DIR}/couchdb-data-${TIMESTAMP}.tar.gz"
+fi
 BACKUP_SCRIPT
 
 chmod +x /opt/vaultwarden-backup.sh

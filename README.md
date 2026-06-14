@@ -7,6 +7,7 @@ Self-hosted Bitwarden-compatible password manager using [Vaultwarden](https://gi
 - [Quick start — local](#quick-start--local)
 - [Configuration](#configuration)
 - [Docker Compose profiles](#docker-compose-profiles)
+- [Obsidian Sync (CouchDB)](#obsidian-sync-couchdb)
 - [Production — Azure deployment](#production--azure-deployment)
 - [Security hardening](#security-hardening)
 - [Backups](#backups)
@@ -53,6 +54,10 @@ All settings live in `.env` (copy from `.env.example`).
 | `ADMIN_ALLOWED_IP` | `127.0.0.1` | IP allowed to reach `/admin` — set to your public IP in production |
 | `LOG_LEVEL` | `info` | `warn` or `error` for production |
 | `TZ` | `America/Chicago` | Timezone for Fail2Ban log timestamps |
+| `GROCY_DOMAIN` | `grocy.localhost` | Hostname for the Grocy household-management app |
+| `OBSIDIAN_DOMAIN` | `obsidian.localhost` | Hostname for the CouchDB Obsidian LiveSync backend |
+| `COUCHDB_USER` | `admin` | CouchDB admin username (used by the LiveSync plugin) |
+| `COUCHDB_PASSWORD` | *(required)* | CouchDB admin password — generate with `openssl rand -base64 24` |
 
 ### Generate an admin token
 
@@ -72,7 +77,7 @@ docker compose --profile caddy restart vaultwarden
 
 | Profile | Services | Use case |
 |---|---|---|
-| `caddy` | Vaultwarden + Caddy + Fail2Ban | Local dev and direct-TLS production |
+| `caddy` | Vaultwarden + Grocy + CouchDB + Caddy + Fail2Ban | Local dev and direct-TLS production |
 | `tunnel` | Vaultwarden + cloudflared + Fail2Ban | Cloudflare Tunnel (no open ports needed) |
 
 ```bash
@@ -84,6 +89,29 @@ docker compose --profile tunnel up -d
 ```
 
 Caddy automatically issues a self-signed cert for `localhost` and a Let's Encrypt cert for any real domain — no extra config needed.
+
+---
+
+## Obsidian Sync (CouchDB)
+
+[Obsidian Self-hosted LiveSync](https://github.com/vrtmrz/obsidian-livesync) syncs your vault between devices via a CouchDB database running here.
+
+### Setup
+
+1. Set `COUCHDB_USER` and `COUCHDB_PASSWORD` in `.env` (use a strong, unique password — this database is reachable from any network).
+2. Start the stack: `docker compose --profile caddy up -d`
+3. In Obsidian, install the **Self-hosted LiveSync** community plugin.
+4. Open the plugin settings → Remote Database configuration:
+   - **URI**: `https://<OBSIDIAN_DOMAIN>`
+   - **Username** / **Password**: your `COUCHDB_USER` / `COUCHDB_PASSWORD`
+   - **Database name**: any name, e.g. `obsidian-vault`
+5. Click **Test Database Connection**, then **Check Database Configuration** and apply any suggested fixes (CORS, chunk size, etc.) — the plugin configures CouchDB automatically.
+6. **First device only**: click **Check and Fix**, then **Replicate**.
+7. **Every other device**: same plugin setup, then click **Fetch** on first connect.
+
+Notes:
+- CouchDB has no IP restriction (unlike `/admin`) since sync clients connect from many networks. Security relies on HTTPS + your CouchDB password — keep it strong.
+- The Fauxton admin UI is reachable at `https://<OBSIDIAN_DOMAIN>/_utils` if you need to inspect databases directly.
 
 ---
 
@@ -173,10 +201,10 @@ See `fail2ban/README.md` for Fail2Ban details and Cloudflare Tunnel integration 
 
 A daily cron job runs at **02:30 UTC** and:
 
-1. Creates a compacted, WAL-free SQLite snapshot using `VACUUM INTO`
-2. Archives that snapshot plus all other volume data (RSA keys, attachments, sends, config) — excluding `icon_cache` which is auto-regenerated
-3. Saves a timestamped `.tar.gz` to `/opt/backups/` (30-day local retention)
-4. Uploads to Azure Blob Storage (`vw-backups` container) using the VM's managed identity — no credentials stored anywhere
+1. For Vaultwarden and Grocy: creates a compacted, WAL-free SQLite snapshot using `VACUUM INTO`, then archives it plus the rest of each volume (RSA keys, attachments, sends, config — excluding `icon_cache` which is auto-regenerated)
+2. For CouchDB: dumps every database's documents via `_all_docs` into JSON files and archives them (CouchDB isn't SQLite, so `VACUUM INTO` doesn't apply — an HTTP-level dump is a safe, portable snapshot of a live server)
+3. Saves timestamped `.tar.gz` files to `/opt/backups/` (30-day local retention)
+4. Uploads each archive to Azure Blob Storage (`vw-backups` container) using the VM's managed identity — no credentials stored anywhere
 
 ```bash
 # Run a backup manually
@@ -228,6 +256,22 @@ az storage blob download \
   --auth-mode login
 ```
 
+### Restoring CouchDB
+
+CouchDB backups are per-database JSON dumps (`_all_docs` output), not a volume snapshot. Restore by posting each dump back to a (new) database:
+
+```bash
+# Create the database first (if it doesn't exist)
+curl -u admin:<password> -X PUT https://<OBSIDIAN_DOMAIN>/obsidian-vault
+
+# Re-insert documents from the dump
+python3 -c "import json; d=json.load(open('obsidian-vault.json')); print(json.dumps({'docs':[r['doc'] for r in d['rows']]}))" \
+  | curl -u admin:<password> -X POST https://<OBSIDIAN_DOMAIN>/obsidian-vault/_bulk_docs \
+      -H "Content-Type: application/json" -d @-
+```
+
+Then re-run the LiveSync plugin's **Check and Fix** / **Replicate** on each device.
+
 ---
 
 ## Architecture
@@ -235,7 +279,9 @@ az storage blob download \
 ```
 Internet
    │
-   ├─ :443 (HTTPS) ──► Caddy ──► Vaultwarden:80
+   ├─ :443 (HTTPS) ──► Caddy ──► Vaultwarden:80 (DOMAIN)
+   │                     ├──► Grocy:80          (GROCY_DOMAIN)
+   │                     ├──► CouchDB:5984       (OBSIDIAN_DOMAIN)
    │                     │
    │              Let's Encrypt (real domain)
    │              self-signed CA (localhost)
@@ -249,6 +295,6 @@ admin: 3/10min → 24hr ban, SSH: 5 failures → 1hr ban).
 Optional: replace Caddy with Cloudflare Tunnel (profile: tunnel)
 — no inbound ports needed, see docs/cloudflare-setup.md.
 
-Data: Docker named volume vw-data (persists across restarts)
+Data: Docker named volumes (vw-data, grocy-data, couchdb-data)
 Backups: daily tar.gz → /opt/backups/ + Azure Blob Storage
 ```

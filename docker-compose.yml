@@ -58,6 +58,34 @@ services:
       start_period: 40s
 
   # ─────────────────────────────────────────────
+  # CouchDB — backend for Obsidian Self-hosted LiveSync.
+  # Runs in caddy profile alongside Vaultwarden/Grocy.
+  # Accessible at OBSIDIAN_DOMAIN (see .env). Use the
+  # LiveSync plugin's setup wizard to configure CORS etc.
+  # ─────────────────────────────────────────────
+  couchdb:
+    profiles: ["caddy"]
+    image: couchdb:3.3
+    container_name: couchdb
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: ${COUCHDB_USER:-admin}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:?Set COUCHDB_PASSWORD in .env}
+    volumes:
+      - couchdb-data:/opt/couchdb/data
+      - couchdb-config:/opt/couchdb/etc/local.d
+    networks:
+      - vw-internal
+    expose:
+      - "5984"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5984/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ─────────────────────────────────────────────
   # CADDY profile — Caddy provides HTTPS via:
   #   localhost        → self-signed cert (local dev)
   #   vault.kaosklan.net → automatic Let's Encrypt cert
@@ -79,6 +107,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:-localhost}
       GROCY_DOMAIN: ${GROCY_DOMAIN:-grocy.localhost}
+      OBSIDIAN_DOMAIN: ${OBSIDIAN_DOMAIN:-obsidian.localhost}
       ADMIN_ALLOWED_IP: ${ADMIN_ALLOWED_IP:-127.0.0.1}
     networks:
       - vw-internal
@@ -86,6 +115,8 @@ services:
       vaultwarden:
         condition: service_started
       grocy:
+        condition: service_started
+      couchdb:
         condition: service_started
 
   # ─────────────────────────────────────────────
@@ -140,6 +171,10 @@ volumes:
   vw-data:
     driver: local
   grocy-data:
+    driver: local
+  couchdb-data:
+    driver: local
+  couchdb-config:
     driver: local
   caddy-data:
     driver: local
