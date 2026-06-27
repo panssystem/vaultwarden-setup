@@ -56,15 +56,24 @@ cat > /etc/docker/daemon.json << 'EOF'
 EOF
 systemctl restart docker
 
-echo "==> [7/7] Installing daily backup cron job..."
+echo "==> [7/8] Installing daily backup cron job..."
 if [[ -f "$REPO_DIR/scripts/install-backup.sh" ]]; then
   bash "$REPO_DIR/scripts/install-backup.sh"
 else
   echo "NOTE: $REPO_DIR/scripts/install-backup.sh not found — clone the repo and run it manually."
 fi
 
+echo "==> [8/8] Installing daily image-update-check cron job..."
+if [[ -f "$REPO_DIR/scripts/install-update-check.sh" ]]; then
+  bash "$REPO_DIR/scripts/install-update-check.sh"
+else
+  echo "NOTE: $REPO_DIR/scripts/install-update-check.sh not found — clone the repo and run it manually."
+fi
+
 echo ""
 echo "==> Setup complete!"
+echo "    Set NTFY_TOPIC in .env to get a push notification when a new"
+echo "    image version is available (checked daily, never auto-applied)."
 echo "    Next steps:"
 echo "    1. SSH into the VM: ssh azureuser@<VM_PUBLIC_IP>"
 echo "    2. cd $REPO_DIR"
