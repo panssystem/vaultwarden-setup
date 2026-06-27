@@ -12,6 +12,7 @@ Self-hosted Bitwarden-compatible password manager using [Vaultwarden](https://gi
 - [Security hardening](#security-hardening)
 - [Backups](#backups)
 - [Restoring from a backup](#restoring-from-a-backup)
+- [Keeping images up to date](#keeping-images-up-to-date)
 - [Architecture](#architecture)
 
 ---
@@ -227,6 +228,28 @@ For a portable backup importable into any Bitwarden-compatible client, export fr
 **Settings → Vault → Export vault**
 
 Store the exported file somewhere safe and separate from the server.
+
+---
+
+## Keeping images up to date
+
+A daily cron job (`scripts/check-image-updates.sh`) checks every image in `docker-compose.yml` for a newer version. It only pulls and compares — it never recreates a running container, so nothing changes on its own.
+
+Set `NTFY_TOPIC` in `.env` to get a free push notification (via [ntfy.sh](https://ntfy.sh)) when an update is found. Without it, results just go to the log.
+
+```bash
+# Check now
+bash scripts/check-image-updates.sh
+
+# View the daily check log
+tail -f /var/log/vw-image-updates.log
+
+# Apply available updates (after reviewing release notes, especially for Vaultwarden)
+docker compose --profile caddy pull
+docker compose --profile caddy up -d
+```
+
+Installed automatically by `setup-server.sh` on first boot; safe to re-run any time with `sudo bash scripts/install-update-check.sh`.
 
 ---
 
