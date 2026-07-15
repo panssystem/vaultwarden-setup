@@ -117,6 +117,32 @@ backup_couchdb() {
 }
 backup_couchdb
 
+# ── Continuwuity (Matrix — optional, profile: matrix) ──────────────────────────
+# Not a SQLite database (RocksDB), so VACUUM INTO doesn't apply, and unlike
+# CouchDB there's no HTTP dump endpoint — this is a plain tar of the live data
+# directory. RocksDB is crash-consistent, so this is safe for a personal/
+# minimal-use server; it isn't a point-in-time transactional snapshot. Skips
+# entirely if the matrix profile has never been enabled (no such container).
+backup_continuwuity() {
+  local prefix="continuwuity"
+  local archive="${BACKUP_DIR}/${prefix}-data-${TIMESTAMP}.tar.gz"
+
+  echo "  Backing up ${prefix}..."
+
+  if ! docker ps -a --format '{{.Names}}' | grep -qx continuwuity; then
+    echo "    SKIP: continuwuity not enabled (matrix profile never started)."
+    return
+  fi
+
+  docker run --rm \
+    -v "vaultwarden-setup_continuwuity-data:/vol:ro" \
+    -v "${BACKUP_DIR}:/backup" \
+    alpine tar czf "/backup/${prefix}-data-${TIMESTAMP}.tar.gz" -C /vol .
+
+  echo "    ${archive} ($(du -sh "$archive" | cut -f1))"
+}
+backup_continuwuity
+
 # ── Prune local archives older than 30 days ───────────────────────────────────
 find "$BACKUP_DIR" -name "*-data-*.tar.gz" -mtime +30 -delete
 
@@ -162,4 +188,7 @@ upload_blob "${BACKUP_DIR}/vaultwarden-data-${TIMESTAMP}.tar.gz"
 upload_blob "${BACKUP_DIR}/grocy-data-${TIMESTAMP}.tar.gz"
 if [[ -f "${BACKUP_DIR}/couchdb-data-${TIMESTAMP}.tar.gz" ]]; then
   upload_blob "${BACKUP_DIR}/couchdb-data-${TIMESTAMP}.tar.gz"
+fi
+if [[ -f "${BACKUP_DIR}/continuwuity-data-${TIMESTAMP}.tar.gz" ]]; then
+  upload_blob "${BACKUP_DIR}/continuwuity-data-${TIMESTAMP}.tar.gz"
 fi

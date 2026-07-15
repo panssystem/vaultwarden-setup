@@ -8,6 +8,7 @@ Self-hosted Bitwarden-compatible password manager using [Vaultwarden](https://gi
 - [Configuration](#configuration)
 - [Docker Compose profiles](#docker-compose-profiles)
 - [Obsidian Sync (CouchDB)](#obsidian-sync-couchdb)
+- [Matrix chat (Continuwuity)](#matrix-chat-continuwuity)
 - [Production — Azure deployment](#production--azure-deployment)
 - [Security hardening](#security-hardening)
 - [Backups](#backups)
@@ -114,6 +115,59 @@ Notes:
 - CouchDB has no IP restriction (unlike `/admin`) since sync clients connect from many networks. Security relies on HTTPS + your CouchDB password — keep it strong.
 - The Fauxton admin UI is reachable at `https://<OBSIDIAN_DOMAIN>/_utils` if you need to inspect databases directly.
 - CORS is pre-configured for the LiveSync plugin's origins (`app://obsidian.md`, `capacitor://localhost`, `http://localhost`) on every container start. If you previously used the plugin's "Check Database Configuration → Fix" button and saw a "CORS is not allowing credentials" error (a known issue when that fix sets `cors/origins` to `*`, which browsers reject when credentials are included — [obsidian-livesync#613](https://github.com/vrtmrz/obsidian-livesync/issues/613)), pull this update and recreate the container: `docker compose --profile caddy up -d --force-recreate couchdb`.
+
+---
+
+## Matrix chat (Continuwuity)
+
+[Continuwuity](https://continuwuity.org/) is a lightweight Matrix homeserver — a self-hosted, Discord-style chat you and people you invite can use from any Matrix client (e.g. [Element](https://element.io/)).
+
+It ships with every clone but is **not started automatically**. Enable it yourself:
+
+```bash
+docker compose --profile matrix up -d
+```
+
+### First-time setup
+
+1. Set `MATRIX_DOMAIN` in `.env` (defaults to `matrix.localhost` for local testing).
+2. Temporarily allow registration to create your account(s):
+   ```bash
+   # in .env
+   MATRIX_ALLOW_REGISTRATION=true
+   MATRIX_REGISTRATION_TOKEN=some-random-string-only-you-know
+   ```
+   ```bash
+   docker compose --profile matrix up -d --force-recreate continuwuity
+   ```
+3. Register in your Matrix client of choice (e.g. Element → "Create account" → homeserver `https://<MATRIX_DOMAIN>`, using the registration token above).
+4. Once your account(s) exist, close registration back down:
+   ```bash
+   # in .env
+   MATRIX_ALLOW_REGISTRATION=false
+   ```
+   ```bash
+   docker compose --profile matrix up -d --force-recreate continuwuity
+   ```
+
+### Federation
+
+`MATRIX_ALLOW_FEDERATION` is `false` by default — this runs as a private, single-server chat. To let people on other homeservers join your rooms:
+
+1. Make sure `MATRIX_DOMAIN` has a real public DNS A record pointing at this server (not `.localhost`).
+2. Set `MATRIX_ALLOW_FEDERATION=true` in `.env`.
+3. `docker compose --profile matrix up -d --force-recreate continuwuity`
+
+That's it — **no port 8448, no NSG changes, no extra Caddy port.** `MATRIX_DOMAIN` has no explicit port, so other homeservers check `https://<MATRIX_DOMAIN>/.well-known/matrix/server` (port 443) before falling back to 8448. The Caddyfile already answers that with `{"m.server": "<MATRIX_DOMAIN>:443"}`, which keeps all federation traffic on the same 443 port Caddy already has open.
+
+Notes:
+- Resource usage is fine for small/private rooms; joining a large public room pulls down its full member list/state and can noticeably spike RAM and disk — be deliberate about what you join on a small VM.
+- Your homeserver becomes reachable by any Matrix server on the internet (normal background key-lookup traffic, not a special risk) — there's no `/admin`-style panel exposed the way Vaultwarden has one.
+- Fail2ban currently only watches Vaultwarden's log, not Continuwuity — not needed for federation to work, but worth adding if you ever see abuse.
+
+### Data and backups
+
+Continuwuity's data (RocksDB) lives in the `continuwuity-data` volume. It's included in the daily backup job (`scripts/vaultwarden-backup.sh`) as a plain tar snapshot — RocksDB is crash-consistent, so this is safe for personal use, though it isn't a fully transactional point-in-time snapshot. The backup step is skipped automatically if you've never enabled the `matrix` profile.
 
 ---
 

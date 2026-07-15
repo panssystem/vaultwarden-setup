@@ -3,6 +3,7 @@
 #   DOMAIN            — Vaultwarden hostname (e.g. vault.kaosklan.net or localhost)
 #   GROCY_DOMAIN      — Grocy hostname       (e.g. grocy.kaosklan.net or grocy.localhost)
 #   OBSIDIAN_DOMAIN   — CouchDB hostname     (e.g. obsidian.kaosklan.net or obsidian.localhost)
+#   MATRIX_DOMAIN     — Continuwuity hostname (e.g. matrix.kaosklan.net or matrix.localhost)
 #   ADMIN_ALLOWED_IP  — IP allowed to reach Vaultwarden /admin (default: 127.0.0.1)
 #
 # Caddy auto-issues:
@@ -52,6 +53,49 @@
 {$GROCY_DOMAIN:grocy.localhost} {
 
     reverse_proxy grocy:80 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "no-referrer"
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
+
+# ── Continuwuity (Matrix — optional, profile: matrix) ──────────────────────
+# Only reachable once you've enabled the service:
+#   docker compose --profile matrix up -d
+#
+# Well-known delegation: MATRIX_DOMAIN has no explicit port, so other
+# homeservers look here (port 443) first before falling back to the default
+# federation port 8448. Answering with ":443" keeps federation traffic on
+# the same port Caddy already exposes — no extra port needs to be opened.
+# Only takes effect once MATRIX_ALLOW_FEDERATION=true (see README).
+
+{$MATRIX_DOMAIN:matrix.localhost} {
+
+    @wellknown-server path /.well-known/matrix/server
+    handle @wellknown-server {
+        header Content-Type application/json
+        respond `{"m.server": "{$MATRIX_DOMAIN:matrix.localhost}:443"}` 200
+    }
+
+    @wellknown-client path /.well-known/matrix/client
+    handle @wellknown-client {
+        header Content-Type application/json
+        respond `{"m.homeserver": {"base_url": "https://{$MATRIX_DOMAIN:matrix.localhost}"}}` 200
+    }
+
+    reverse_proxy continuwuity:8008 {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
