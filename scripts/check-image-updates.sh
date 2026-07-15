@@ -17,7 +17,7 @@ fi
 
 # COMPOSE_PROFILES makes `config --images` list every service regardless of
 # which profile is actually running.
-IMAGES=$(COMPOSE_PROFILES=caddy,tunnel docker compose config --images | sort -u)
+IMAGES=$(COMPOSE_PROFILES=caddy,tunnel,matrix docker compose config --images | sort -u)
 
 UPDATES=()
 for image in $IMAGES; do

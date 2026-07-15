@@ -111,6 +111,45 @@ services:
       start_period: 20s
 
   # ─────────────────────────────────────────────
+  # Continuwuity — Matrix homeserver (Discord-style chat).
+  # NOT started automatically — this is opt-in. The service definition
+  # ships with every clone, but you turn it on yourself:
+  #   docker compose --profile matrix up -d
+  #
+  # Federation is off by default (CONTINUWUITY_ALLOW_FEDERATION=false) —
+  # a private single-server chat doesn't need it, and it avoids the extra
+  # port (8448) and DNS setup federation requires. Registration is also
+  # off by default, same pattern as Vaultwarden's SIGNUPS_ALLOWED: flip
+  # MATRIX_ALLOW_REGISTRATION=true + set MATRIX_REGISTRATION_TOKEN,
+  # create your account(s), then flip registration back off.
+  # ─────────────────────────────────────────────
+  continuwuity:
+    profiles: ["matrix"]
+    image: ghcr.io/continuwuity/continuwuity:latest
+    container_name: continuwuity
+    restart: unless-stopped
+    environment:
+      CONTINUWUITY_SERVER_NAME: ${MATRIX_DOMAIN:-matrix.localhost}
+      CONTINUWUITY_DATABASE_PATH: /var/lib/continuwuity
+      CONTINUWUITY_ADDRESS: 0.0.0.0
+      CONTINUWUITY_PORT: 8008
+      CONTINUWUITY_ALLOW_REGISTRATION: ${MATRIX_ALLOW_REGISTRATION:-false}
+      CONTINUWUITY_REGISTRATION_TOKEN: ${MATRIX_REGISTRATION_TOKEN:-}
+      CONTINUWUITY_ALLOW_FEDERATION: ${MATRIX_ALLOW_FEDERATION:-false}
+    volumes:
+      - continuwuity-data:/var/lib/continuwuity
+    networks:
+      - vw-internal
+    expose:
+      - "8008"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:8008/_matrix/client/versions"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ─────────────────────────────────────────────
   # CADDY profile — Caddy provides HTTPS via:
   #   localhost        → self-signed cert (local dev)
   #   vault.kaosklan.net → automatic Let's Encrypt cert
@@ -133,6 +172,7 @@ services:
       DOMAIN: ${DOMAIN:-localhost}
       GROCY_DOMAIN: ${GROCY_DOMAIN:-grocy.localhost}
       OBSIDIAN_DOMAIN: ${OBSIDIAN_DOMAIN:-obsidian.localhost}
+      MATRIX_DOMAIN: ${MATRIX_DOMAIN:-matrix.localhost}
       ADMIN_ALLOWED_IP: ${ADMIN_ALLOWED_IP:-127.0.0.1}
     networks:
       - vw-internal
@@ -211,6 +251,8 @@ volumes:
   couchdb-data:
     driver: local
   couchdb-config:
+    driver: local
+  continuwuity-data:
     driver: local
   caddy-data:
     driver: local
