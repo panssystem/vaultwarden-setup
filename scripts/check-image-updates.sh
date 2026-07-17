@@ -42,3 +42,20 @@ if [[ -n "${NTFY_TOPIC:-}" ]]; then
   curl -fsS -d "$MSG" "${NTFY_URL:-https://ntfy.sh}/${NTFY_TOPIC}" >/dev/null \
     || echo "WARN: ntfy notification failed"
 fi
+
+# Optional: post the same message into a Matrix room via your own
+# Continuwuity server, using the Client-Server API directly (no federation
+# required — this always works even with MATRIX_ALLOW_FEDERATION=false).
+# Requires a dedicated bot account's access token — see README.
+if [[ -n "${MATRIX_NOTIFY_ROOM_ID:-}" && -n "${MATRIX_NOTIFY_ACCESS_TOKEN:-}" ]]; then
+  homeserver="${MATRIX_NOTIFY_HOMESERVER:-https://${MATRIX_DOMAIN:-matrix.localhost}}"
+  room_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$MATRIX_NOTIFY_ROOM_ID")
+  txn="vw-update-$(date +%s%N)"
+  body=$(python3 -c "import json,sys; print(json.dumps({'msgtype': 'm.text', 'body': sys.argv[1]}))" "$MSG")
+  curl -fsS -X PUT \
+    "${homeserver}/_matrix/client/v3/rooms/${room_enc}/send/m.room.message/${txn}" \
+    -H "Authorization: Bearer ${MATRIX_NOTIFY_ACCESS_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$body" >/dev/null \
+    || echo "WARN: Matrix notification failed"
+fi
