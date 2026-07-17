@@ -83,15 +83,22 @@
 
 {$MATRIX_DOMAIN:matrix.localhost} {
 
+    # Access-Control-Allow-Origin is required here: Element Web and other
+    # browser-based clients fetch these cross-origin, and without it the
+    # browser silently blocks the response (client shows "does not appear
+    # to be a valid matrix homeserver"). Safe to leave wide open — these
+    # responses carry no user data or credentials.
     @wellknown-server path /.well-known/matrix/server
     handle @wellknown-server {
         header Content-Type application/json
+        header Access-Control-Allow-Origin *
         respond `{"m.server": "{$MATRIX_DOMAIN:matrix.localhost}:443"}` 200
     }
 
     @wellknown-client path /.well-known/matrix/client
     handle @wellknown-client {
         header Content-Type application/json
+        header Access-Control-Allow-Origin *
         respond `{"m.homeserver": {"base_url": "https://{$MATRIX_DOMAIN:matrix.localhost}"}}` 200
     }
 
