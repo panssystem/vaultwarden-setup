@@ -289,7 +289,7 @@ Store the exported file somewhere safe and separate from the server.
 
 A daily cron job (`scripts/check-image-updates.sh`) checks every image in `docker-compose.yml` for a newer version. It only pulls and compares — it never recreates a running container, so nothing changes on its own.
 
-Set `NTFY_TOPIC` in `.env` to get a free push notification (via [ntfy.sh](https://ntfy.sh)) when an update is found. Without it, results just go to the log.
+Set `NTFY_TOPIC` in `.env` to get a free push notification (via [ntfy.sh](https://ntfy.sh)) when an update is found, or `MATRIX_NOTIFY_ROOM_ID` + `MATRIX_NOTIFY_ACCESS_TOKEN` to post into a Matrix room on your own Continuwuity server instead (see below). Both can be set at once if you want it in two places. Without either, results just go to the log.
 
 ```bash
 # Check now
@@ -304,6 +304,22 @@ docker compose --profile caddy up -d
 ```
 
 Installed automatically by `setup-server.sh` on first boot; safe to re-run any time with `sudo bash scripts/install-update-check.sh`.
+
+### Notifying via Matrix instead of ntfy
+
+This posts to a Matrix room using the Client-Server API directly (a plain HTTPS `curl` from the host) — it works even with `MATRIX_ALLOW_FEDERATION=false`, since it's not federation traffic. Requires Continuwuity to be enabled (`docker compose --profile matrix up -d`).
+
+1. Create a dedicated bot account (temporarily, same registration-token dance as [Matrix chat](#matrix-chat-continuwuity) first-time setup — remember to flip `MATRIX_ALLOW_REGISTRATION` back to `false` afterward).
+2. Get its access token by logging in via the API:
+   ```bash
+   curl -s -X POST https://<MATRIX_DOMAIN>/_matrix/client/v3/login \
+     -H "Content-Type: application/json" \
+     -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"updatebot"},"password":"<bot-password>"}'
+   ```
+   Copy the `access_token` from the response — this goes in `MATRIX_NOTIFY_ACCESS_TOKEN`. Treat it like a password (it doesn't expire on its own).
+3. In a Matrix client, create a room (or reuse one) and invite the bot account; accept the invite as the bot (or join it, if you left registration open long enough to do so).
+4. Find the room ID: room settings → Advanced → "Internal room ID" in Element (looks like `!abc123:yourdomain.com`) — this goes in `MATRIX_NOTIFY_ROOM_ID`.
+5. Set `MATRIX_NOTIFY_HOMESERVER` if it differs from `https://<MATRIX_DOMAIN>` (usually you can leave it unset).
 
 ---
 
