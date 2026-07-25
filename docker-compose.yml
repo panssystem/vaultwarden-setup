@@ -22,8 +22,11 @@ services:
     expose:
       - "80"
     healthcheck:
-      # vaultwarden/server is Debian-slim — use wget, not curl
-      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:80/alive"]
+      # vaultwarden/server's current image has curl but not wget
+      # (this has flipped at least once before — if this starts failing
+      # again, exec in and check `command -v curl wget` before assuming
+      # the app itself is broken).
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:80/alive"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -142,12 +145,10 @@ services:
       - vw-internal
     expose:
       - "8008"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:8008/_matrix/client/versions"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+    # No healthcheck: this image is scratch/distroless-style — no shell, no
+    # wget/curl, nothing Docker can exec inside the container to check. Use
+    # `docker logs continuwuity` or hit /_matrix/client/versions through
+    # Caddy from outside to verify it's actually up.
 
   # ─────────────────────────────────────────────
   # CADDY profile — Caddy provides HTTPS via:
