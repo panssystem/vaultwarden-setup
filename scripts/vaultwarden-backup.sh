@@ -3,7 +3,7 @@
 # - VACUUM INTO for each SQLite database: compact, WAL-free, safe on live containers
 # - _all_docs dump for CouchDB databases (not SQLite, so VACUUM INTO doesn't apply)
 # - tar archive of remaining volume data (RSA keys, attachments, config, etc.)
-# - Local retention: 30 days in /opt/backups
+# - Local retention: 5 days in /opt/backups (Azure keeps the rest)
 # - Remote: Azure Blob Storage via VM managed identity (no credentials stored)
 # Config: /etc/vaultwarden-backup.conf (written by deploy.sh)
 #
@@ -143,8 +143,18 @@ backup_continuwuity() {
 }
 backup_continuwuity
 
-# ── Prune local archives older than 30 days ───────────────────────────────────
-find "$BACKUP_DIR" -name "*-data-*.tar.gz" -mtime +30 -delete
+# ── Prune old local archives ──────────────────────────────────────────────────
+# Azure Blob Storage is the long-term copy; the VM only keeps a few recent
+# archives for fast restores (the disk is small). Override with
+# BACKUP_RETENTION_DAYS in /etc/vaultwarden-backup.conf if needed.
+RETENTION_DAYS=5
+if [[ -f /etc/vaultwarden-backup.conf ]]; then
+  # shellcheck source=/dev/null
+  RETENTION_DAYS=$(source /etc/vaultwarden-backup.conf; echo "${BACKUP_RETENTION_DAYS:-5}")
+fi
+find "$BACKUP_DIR" -name "*-data-*.tar.gz" -mtime +"$RETENTION_DAYS" -delete
+# Leftover scratch dirs from runs that died mid-backup (e.g. disk full)
+find "$BACKUP_DIR" -maxdepth 1 -name ".tmp-*" -mtime +1 -exec rm -rf {} +
 
 # ── Upload to Azure Blob Storage ──────────────────────────────────────────────
 # Reads storage account name from config written by deploy.sh.

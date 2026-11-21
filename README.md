@@ -259,7 +259,7 @@ A daily cron job runs at **02:30 UTC** and:
 
 1. For Vaultwarden and Grocy: creates a compacted, WAL-free SQLite snapshot using `VACUUM INTO`, then archives it plus the rest of each volume (RSA keys, attachments, sends, config — excluding `icon_cache` which is auto-regenerated)
 2. For CouchDB: dumps every database's documents via `_all_docs` into JSON files and archives them (CouchDB isn't SQLite, so `VACUUM INTO` doesn't apply — an HTTP-level dump is a safe, portable snapshot of a live server)
-3. Saves timestamped `.tar.gz` files to `/opt/backups/` (30-day local retention)
+3. Saves timestamped `.tar.gz` files to `/opt/backups/` (5-day local retention by default — set `BACKUP_RETENTION_DAYS` in `/etc/vaultwarden-backup.conf` to change; older copies live only in Azure)
 4. Uploads each archive to Azure Blob Storage (`vw-backups` container) using the VM's managed identity — no credentials stored anywhere
 
 ```bash
